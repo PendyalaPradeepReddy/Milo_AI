@@ -1,6 +1,6 @@
 ﻿# Milo AI Chatbot
 
-![Milo AI Chatbot](https://milo-ai-chatbot.netlify.app/) <!-- Replace with actual image url if you have one -->
+Milo AI Chatbot
 
 A fully functional, modern React-based ChatGPT-style AI chatbot that uses WebSocket for real-time streaming conversations.
 
