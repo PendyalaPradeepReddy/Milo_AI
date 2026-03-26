@@ -1,0 +1,11 @@
+const fs = require('fs');
+let code = fs.readFileSync('src/App.tsx', 'utf8');
+
+// Fix startNewChat
+code = code.replace(/const newId = \\chat-\\\\;/, 'const newId = chat-10' + '{Date.now()};');
+code = code.replace(/const welcomeId = \\msg-\\/-welcome\\\\;/, 'const welcomeId = msg-10' + '{Date.now()}-welcome;');
+
+// Fix handleSendMessage
+code = code.replace(/const userMsg: Message = .*?Date\(\) };/g, 'const userMsg: Message = { id: msg-10' + '{Date.now()}, role: "user", content: content.trim(), timestamp: new Date() };');
+code = code.replace(/const assistId = .*?\\;/g, 'const assistId = msg-10' + '{Date.now()}-resp;');
+fs.writeFileSync('src/App.tsx', code);

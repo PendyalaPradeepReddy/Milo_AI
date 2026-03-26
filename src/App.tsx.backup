@@ -1,0 +1,278 @@
+import { useState, useRef, useEffect } from "react";
+import ChatMessage from "./components/ChatMessage";
+import ChatInput from "./components/ChatInput";
+import { WebSocketChatService } from "./services/websocketService";
+import "./App.css";
+
+interface Message {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: Date;
+}
+
+interface ChatSession {
+  id: string;
+  date: string;
+  preview: string;
+}
+
+const SYSTEM_PROMPT = "You are Milo, a friendly and helpful AI assistant.";
+const ALL_CHATS_KEY = "milo_all_chats";
+
+function App() {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [savedChats, setSavedChats] = useState<ChatSession[]>([]);
+  const [currentChatId, setCurrentChatId] = useState<string>("");
+  
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const wsServiceRef = useRef<WebSocketChatService | null>(null);
+
+  const loadSavedChats = (): ChatSession[] => {
+    try {
+      const allChats = localStorage.getItem(ALL_CHATS_KEY);
+      if (allChats) return JSON.parse(allChats);
+    } catch (e) {
+      console.error(e);
+    }
+    return [];
+  };
+
+  useEffect(() => {
+    wsServiceRef.current = new WebSocketChatService(SYSTEM_PROMPT);
+    const chats = loadSavedChats();
+    setSavedChats(chats);
+    
+    if (chats.length > 0) {
+      loadChat(chats[0].id);
+    } else {
+      startNewChat();
+    }
+    
+    return () => wsServiceRef.current?.disconnect();
+  }, []);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  // Auto-save current chat
+  useEffect(() => {
+    if (!currentChatId || messages.length === 0) return;
+    
+    if (messages.length === 1 && messages[0].content === "") {
+      // Don't save if it's just the empty welcome message
+      return;
+    }
+
+    try {
+      localStorage.setItem(currentChatId, JSON.stringify(messages));
+      
+      let allChats = loadSavedChats();
+      let preview = messages.find(m => m.role === "user")?.content.substring(0, 30);
+      if (!preview) preview = "New Chat";
+      
+      const existingIdx = allChats.findIndex(c => c.id === currentChatId);
+      if (existingIdx >= 0) {
+        allChats[existingIdx].preview = preview;
+      } else {
+        allChats.unshift({
+          id: currentChatId,
+          date: new Date().toLocaleString(),
+          preview
+        });
+      }
+      localStorage.setItem(ALL_CHATS_KEY, JSON.stringify(allChats));
+      setSavedChats(allChats);
+    } catch (e) {
+      console.error(e);
+    }
+  }, [messages, currentChatId]);
+
+  const startNewChat = () => {
+    wsServiceRef.current?.disconnect();
+    
+    const newId = \chat-\\;
+    setCurrentChatId(newId);
+    
+    const welcomeId = \msg-\-welcome\;
+    setMessages([{ id: welcomeId, role: "assistant", content: "", timestamp: new Date() }]);
+    setIsLoading(true);
+    
+    wsServiceRef.current = new WebSocketChatService(SYSTEM_PROMPT);
+    wsServiceRef.current.connect(
+      "",
+      (chunk) => {
+        setMessages(prev => prev.map(m => m.id === welcomeId ? { ...m, content: m.content + chunk } : m));
+      },
+      () => setIsLoading(false),
+      (error) => {
+        setMessages([{ id: \error-\\, role: "assistant", content: error, timestamp: new Date() }]);
+        setIsLoading(false);
+      },
+      true
+    );
+  };
+
+  const loadChat = (chatId: string) => {
+    if (isLoading) wsServiceRef.current?.disconnect();
+    try {
+      const saved = localStorage.getItem(chatId);
+      if (saved) {
+        const parsed = JSON.parse(saved).map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) }));
+        setMessages(parsed);
+        setCurrentChatId(chatId);
+        setIsLoading(false);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const deleteChat = (e: React.MouseEvent, chatId: string) => {
+    e.stopPropagation();
+    try {
+      localStorage.removeItem(chatId);
+      let allChats = loadSavedChats();
+      allChats = allChats.filter(c => c.id !== chatId);
+      localStorage.setItem(ALL_CHATS_KEY, JSON.stringify(allChats));
+      setSavedChats(allChats);
+      
+      if (currentChatId === chatId) {
+        if (allChats.length > 0) loadChat(allChats[0].id);
+        else startNewChat();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleSendMessage = (content: string) => {
+    if (!content.trim() || isLoading) return;
+    
+    const userMsg: Message = { id: \msg-\\, role: "user", content: content.trim(), timestamp: new Date() };
+    const assistId = \msg-\-resp\;
+    const assistMsg: Message = { id: assistId, role: "assistant", content: "", timestamp: new Date() };
+    
+    setMessages(prev => [...prev, userMsg, assistMsg]);
+    setIsLoading(true);
+
+    wsServiceRef.current?.connect(
+      content,
+      (chunk) => {
+        setMessages(prev => prev.map(m => m.id === assistId ? { ...m, content: m.content + chunk } : m));
+      },
+      () => setIsLoading(false),
+      (err) => {
+        setMessages(prev => prev.map(m => m.id === assistId ? { ...m, content: err } : m));
+        setIsLoading(false);
+      },
+      false
+    );
+  };
+
+  return (
+    <div style={{ display: "flex", height: "100vh", width: "100vw", background: "var(--bg-color, #f8fafc)" }}>
+      
+      {/* Sidebar */}
+      <div style={{ 
+          width: isSidebarOpen ? "260px" : "0", 
+          transition: "width 0.3s", 
+          overflow: "hidden",
+          background: "#1e293b",
+          color: "white",
+          display: "flex",
+          flexDirection: "column",
+          flexShrink: 0
+        }}>
+        <div style={{ padding: "1rem", minWidth: "260px" }}>
+          <button 
+            onClick={startNewChat}
+            style={{ 
+              width: "100%", padding: "0.75rem", background: "#3b82f6", color: "white", 
+              border: "none", borderRadius: "0.5rem", cursor: "pointer", display:"flex", alignItems:"center", gap:"0.5rem",
+              fontWeight: 500
+            }}>
+            <span>+</span> New chat
+          </button>
+        </div>
+        
+        <div style={{ flex: 1, overflowY: "auto", minWidth: "260px" }}>
+          {savedChats.map(chat => (
+            <div 
+              key={chat.id}
+              onClick={() => loadChat(chat.id)}
+              style={{
+                padding: "0.75rem 1rem",
+                cursor: "pointer",
+                background: currentChatId === chat.id ? "rgba(255,255,255,0.1)" : "transparent",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between"
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255,255,255,0.05)"}
+              onMouseLeave={(e) => e.currentTarget.style.background = currentChatId === chat.id ? "rgba(255,255,255,0.1)" : "transparent"}
+            >
+              <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, fontSize: "0.875rem" }}>
+                {chat.preview}
+              </div>
+              <button 
+                onClick={(e) => deleteChat(e, chat.id)}
+                style={{
+                  background: "transparent", border: "none", color: "#ef4444", cursor: "pointer",
+                  padding: "4px", display: "flex", alignItems: "center", justifyContent: "center"
+                }}
+                title="Delete chat"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, position: "relative" }}>
+        <header style={{ padding: "1rem", display: "flex", alignItems: "center", background: "white", borderBottom: "1px solid #e2e8f0" }}>
+          <button 
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            style={{ background: "transparent", border: "none", fontSize: "1.25rem", cursor: "pointer", marginRight: "1rem" }}
+          >
+            ☰
+          </button>
+          <h1 style={{ margin: 0, fontSize: "1.25rem", color: "#1e293b" }}>Milo</h1>
+        </header>
+
+        <main style={{ flex: 1, overflowY: "auto", padding: "1rem" }}>
+          <div style={{ maxWidth: "48rem", margin: "0 auto", display: "flex", flexDirection: "column", gap: "1rem" }}>
+            {messages.map((msg) => (
+              <ChatMessage key={msg.id} message={msg} />
+            ))}
+            <div ref={messagesEndRef} />
+          </div>
+        </main>
+
+        <footer style={{ padding: "1rem", background: "white", borderTop: "1px solid #e2e8f0" }}>
+          <div style={{ maxWidth: "48rem", margin: "0 auto" }}>
+            <ChatInput
+              onSend={handleSendMessage}
+              disabled={isLoading}
+              onCancel={() => {
+                wsServiceRef.current?.disconnect();
+                setIsLoading(false);
+              }}
+            />
+          </div>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+export default App;
